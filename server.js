@@ -7,82 +7,79 @@ const port = 3000;
 app.use(cors());
 app.use(express.json());
 
-// Endpoint untuk mengirim data ke Google Apps Script
-app.get("/api/send", async (req, res) => {
-  const { id, data } = req.query; // Ambil id dan data dari query parameters
+// Konfigurasi URL Google Apps Script Anda
+const GAS_URL = "https://script.google.com/macros/s/AKfycbx1ZQdGSMAV3wTtH7yIzyNtKALFiKfAG5NdYNmUSKsEeJVvZcBpdJ2T3nd2ZBG744A7/exec";
 
-  if (!id || !data) {
-    return res.status(400).json({ error: "id and data parameters are required" });
-  }
+/**
+ * Endpoint Utama Absensi
+ * Method: POST
+ * Body: { "siswa": "...", "guru": "...", "absen": "..." }
+ */
+app.post("/api/absen", async (req, res) => {
+    const { siswa, guru, absen } = req.body;
 
-  try {
-    const fetch = (await import("node-fetch")).default; // Dynamic Import
-
-    const apiUrl = `https://script.google.com/macros/s/AKfycbxemlqdyzpDU2Z89STAvEnWQlb1ciwTUXeI1vRxJWR3v6rj23ZNhSSP3FIoXqoevguqqg/exec?id=${encodeURIComponent(id)}&data=${encodeURIComponent(data)}`;
-
-    const response = await fetch(apiUrl, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Network response was not ok. Status: ${response.status}`);
+    // 1. Validasi awal di sisi server Express
+    if (!siswa || !guru || !absen) {
+        return res.status(400).json({
+            status: "Error",
+            message: "Missing parameters. Pastikan mengirim siswa, guru, dan absen."
+        });
     }
 
-    const responseData = await response.json();
-    res.json(responseData);
-  } catch (error) {
-    console.error("Error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
+    try {
+        const fetch = (await import("node-fetch")).default;
 
-// Endpoint alternatif dengan POST method
-app.post("/api/send", async (req, res) => {
-  const { id, data } = req.body; // Ambil id dan data dari body
+        // 2. Meneruskan data ke Google Apps Script
+        const response = await fetch(GAS_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ siswa, guru, absen }),
+        });
 
-  if (!id || !data) {
-    return res.status(400).json({ error: "id and data are required in request body" });
-  }
+        if (!response.ok) {
+            throw new Error(`GAS Server Error: ${response.statusText}`);
+        }
 
-  try {
-    const fetch = (await import("node-fetch")).default; // Dynamic Import
+        const responseData = await response.json();
 
-    const apiUrl = `https://script.google.com/macros/s/AKfycbxemlqdyzpDU2Z89STAvEnWQlb1ciwTUXeI1vRxJWR3v6rj23ZNhSSP3FIoXqoevguqqg/exec?id=${encodeURIComponent(id)}&data=${encodeURIComponent(data)}`;
+        // 3. SMART MAPPING: Mengubah status HTTP sesuai isi JSON dari GAS
+        // Jika GAS bilang "Bad Request", Express kirim status 400
+        // Jika GAS bilang "Not Found", Express kirim status 404
+        let httpStatus = 200;
+        if (responseData.status === "Bad Request") httpStatus = 400;
+        if (responseData.status === "Not Found") httpStatus = 404;
+        if (responseData.status === "Error") httpStatus = 500;
 
-    const response = await fetch(apiUrl, {
-      method: "GET",
-    });
+        res.status(httpStatus).json(responseData);
 
-    if (!response.ok) {
-      throw new Error(`Network response was not ok. Status: ${response.status}`);
+    } catch (error) {
+        console.error("Proxy Error:", error);
+        res.status(500).json({
+            status: "Error",
+            message: "Gagal terhubung ke Google Apps Script",
+            error: error.message
+        });
     }
-
-    const responseData = await response.json();
-    res.json(responseData);
-  } catch (error) {
-    console.error("Error:", error);
-    res.status(500).json({ error: error.message });
-  }
 });
 
-// Health check endpoint
+// Health Check & Documentation
 app.get("/", (req, res) => {
-  res.json({ 
-    status: "OK", 
-    message: "Server is running",
-    endpoints: {
-      GET: "/api/send?id=your_id&data=your_data",
-      POST: "/api/send with body { id: 'your_id', data: 'your_data' }"
-    }
-  });
+    res.json({
+        app: "IDN Boarding School Attendance Gateway",
+        version: "1.0.0",
+        endpoint: "POST /api/absen",
+        usage: {
+            payload: {
+                siswa: "Nama Lengkap",
+                guru: "Nama Guru",
+                absen: "HADIR/SAKIT/IZIN/ALFA"
+            }
+        }
+    });
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Server berjalan di http://localhost:${port}`);
-  console.log(`📝 Contoh penggunaan:`);
-  console.log(`   GET:  http://localhost:${port}/api/send?id=halo bang&data=ahh ahh`);
-  console.log(`   POST: http://localhost:${port}/api/send dengan body JSON`);
+    console.log(`\n✅ Server Gateway Berjalan!`);
+    console.log(`📍 Endpoint: http://localhost:${port}/api/absen`);
+    console.log(`🔗 Terhubung ke GAS: ${GAS_URL.substring(0, 40)}...\n`);
 });
